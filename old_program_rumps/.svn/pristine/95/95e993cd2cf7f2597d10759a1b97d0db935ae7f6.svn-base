@@ -1,0 +1,73 @@
+//------------------------------------------------------------------------------
+//
+// Main Program
+// Application		: turboimpl_nc0
+// Core						: Normal Core 0
+// Purpose
+//	- Turbo code implementation on RUMPS401
+//  - > calc a & b
+
+// ### Interfacing with LMS6002D, RX part ###
+
+#include "main.h"
+#include "turbo_rumps_c1.h"
+
+#define IO_STARTTURBO_HDR 0xa
+
+void main_scheduler (void);
+
+const unsigned char ledpin = 0;
+
+//------------------------------------------------------------------------------
+int main(void)
+{
+  set_trellis();
+  
+  //Timer Settings - Lime interfacing
+  TM_PR = 0x1; // prescale target, 4MHz 
+  TM_COMR0 = 0x0; //timer target, ch 0
+  TM_COMCR = 0x3; // reset on COMR, enable interrupt
+  TM_OCR = 0x6; // toggle TM_COM0/COM1 on match
+
+  TM_CTRL = 0x3; // use PCLK, reset timer, enable timer
+  TM_CTRL = 0x1; // use PCLK, start timer, enable timer
+  
+  // MUX - select TM_COM0 & TM_COM1
+  MUXC_SELECT = 0x4;
+
+  short drecv_i = 0;
+  unsigned char itrcount = 0;
+  
+  accum local_deltabuff[r_win][16];
+  accum local_alphabuff[r_win+1][8];
+  accum local_betabuff[r_win][8];
+  
+  accum_int_t temp_accumint; //temp variable for manipulating bits between accum and int type
+  
+  // *** Init Loop - Lime's initialization part ***
+  while(1){
+    // wait for Lime's initialization to be finished
+    while(noc_NC_rxbuff0_av!=1)__NOP();
+    int tempack = NC_NOC_RX_BUFF0;
+    
+    pinMode_output(ledpin);
+
+    //init beta 
+    for(char i=0; i<8; i++)
+      local_betabuff[r_win-1][i] = -2.0794;
+
+    while(noc_NC_txbuff_isfull==1)__NOP();
+    NC_NOC_TX_BUFF0 = tempack;
+
+    break;
+  }
+
+  
+  // *** Main Loop - Turbo coding part ***
+  while(1){
+    __NOP();
+  }		
+   
+	return 0;
+}
+  

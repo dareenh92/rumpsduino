@@ -1,0 +1,487 @@
+//------------------------------------------------------------------------------
+
+//
+
+// Main Program
+// Application    : turboimpl_dspc
+// Core           : DSP Core
+// Purpose
+//  - Turbo code implementation on RUMPS401
+//  - > calc d, LLR
+
+// ### Interfacing with LMS6002D, RX part ###
+
+#include "main.h"
+#include "turbo_rumps_c3.h"
+//#include "libdivide_rumps.h"
+
+#define CODEWORD_LEN 768
+
+#define IO_CHNLCTRL_HDR 0x1
+#define IO_BITS_HDR 0x2
+#define IO_LLRACK_HDR 0x3
+#define IO_NOVAR_HDR 0x4
+#define IO_STARTTURBO_HDR 0xa
+#define IO_RDY 0xb
+#define IO_TX 0xc
+
+#define DSP_LLR_HDR 0x31
+#define DSP_BITSACK_HDR 0x32
+
+#define RX_STOP 0xa0
+#define RX_DETECT 0xa1
+#define RX_TIMING_SYNC 0xa2
+#define RX_FREQ_SYNC 0xa3
+#define RX_PAYLOAD 0xa4
+#define RX_PHASECORR 0xa5
+#define RX_DECODE 0xa6
+#define RX_SENDUP 0xa7
+#define STATE_EMPTY 0xaf
+
+// LED pin number
+const unsigned char ledpin = 0;
+
+// Frequency sync known-preamble
+const accum freqsync_preamble[2] = { // since I=Q, this saves space
+  0.707,   // 1st preamble - 1
+  -0.707  // 2nd preamble - 0
+};
+
+// Mapping constant for sine-cos lookup
+const unsigned long accum sineMappingConst = 0.0012437;
+
+// Sine look up table
+const accum sineTable[256] = {
+  0.0000, 0.0245, 0.0491, 0.0736, 0.0980, 0.1224, 0.1467, 0.1710,
+  0.1951, 0.2191, 0.2430, 0.2667, 0.2903, 0.3137, 0.3369, 0.3599,
+  0.3827, 0.4052, 0.4276, 0.4496, 0.4714, 0.4929, 0.5141, 0.5350,
+  0.5556, 0.5758, 0.5957, 0.6152, 0.6344, 0.6532, 0.6716, 0.6895,
+  0.7071, 0.7242, 0.7410, 0.7572, 0.7730, 0.7883, 0.8032, 0.8176,
+  0.8315, 0.8449, 0.8577, 0.8701, 0.8819, 0.8932, 0.9040, 0.9142,
+  0.9239, 0.9330, 0.9415, 0.9495, 0.9569, 0.9638, 0.9700, 0.9757,
+  0.9808, 0.9853, 0.9892, 0.9925, 0.9952, 0.9973, 0.9988, 0.9997,
+  1.0000, 0.9997, 0.9988, 0.9973, 0.9952, 0.9925, 0.9892, 0.9853,
+  0.9808, 0.9757, 0.9700, 0.9638, 0.9569, 0.9495, 0.9415, 0.9330,
+  0.9239, 0.9142, 0.9040, 0.8932, 0.8819, 0.8701, 0.8577, 0.8449,
+  0.8315, 0.8176, 0.8032, 0.7883, 0.7730, 0.7572, 0.7410, 0.7242,
+  0.7071, 0.6895, 0.6716, 0.6532, 0.6344, 0.6152, 0.5957, 0.5758,
+  0.5556, 0.5350, 0.5141, 0.4929, 0.4714, 0.4496, 0.4276, 0.4052,
+  0.3827, 0.3599, 0.3369, 0.3137, 0.2903, 0.2667, 0.2430, 0.2191,
+  0.1951, 0.1710, 0.1467, 0.1224, 0.0980, 0.0736, 0.0491, 0.0245,
+  0.0000, -0.0245, -0.0491, -0.0736, -0.0980, -0.1224, -0.1467, -0.1710,
+  -0.1951, -0.2191, -0.2430, -0.2667, -0.2903, -0.3137, -0.3369, -0.3599,
+  -0.3827, -0.4052, -0.4276, -0.4496, -0.4714, -0.4929, -0.5141, -0.5350,
+  -0.5556, -0.5758, -0.5957, -0.6152, -0.6344, -0.6532, -0.6716, -0.6895,
+  -0.7071, -0.7242, -0.7410, -0.7572, -0.7730, -0.7883, -0.8032, -0.8176,
+  -0.8315, -0.8449, -0.8577, -0.8701, -0.8819, -0.8932, -0.9040, -0.9142,
+  -0.9239, -0.9330, -0.9415, -0.9495, -0.9569, -0.9638, -0.9700, -0.9757,
+  -0.9808, -0.9853, -0.9892, -0.9925, -0.9952, -0.9973, -0.9988, -0.9997,
+  -1.0000, -0.9997, -0.9988, -0.9973, -0.9952, -0.9925, -0.9892, -0.9853,
+  -0.9808, -0.9757, -0.9700, -0.9638, -0.9569, -0.9495, -0.9415, -0.9330,
+  -0.9239, -0.9142, -0.9040, -0.8932, -0.8819, -0.8701, -0.8577, -0.8449,
+  -0.8315, -0.8176, -0.8032, -0.7883, -0.7730, -0.7572, -0.7410, -0.7242,
+  -0.7071, -0.6895, -0.6716, -0.6532, -0.6344, -0.6152, -0.5957, -0.5758,
+  -0.5556, -0.5350, -0.5141, -0.4929, -0.4714, -0.4496, -0.4276, -0.4052,
+  -0.3827, -0.3599, -0.3369, -0.3137, -0.2903, -0.2667, -0.2430, -0.2191,
+  -0.1951, -0.1710, -0.1467, -0.1224, -0.0980, -0.0736, -0.0491, -0.0245
+};
+
+// sine lookup table, for details look at note
+// RUMPS and n1169 extension specific
+inline accum sin_lookup(int inAngle){
+  int idx = 0;
+  int angleSign = sign_f(inAngle);
+  
+  // Filter input angle
+  if(angleSign<0) // sin(-x) = -sin(x)
+    inAngle = (~inAngle)+1;
+
+  // COMPILER_ERROR - assuming input won't exceed 2pi
+  // let's discard this operation for now
+  while(inAngle>205887) // sin(x) = sin(x+2pi)
+    inAngle-=205887;
+  
+  // Index mapping - inAngle to LUT index
+  // simply want integer part of inAngle * mappingConst
+  // implementation is a bit complicated due to 64bit mul
+  ulaccum_int_t mappingInput,
+                mappingConst;
+  mappingInput.ulaccum_cont = inAngle;          // A
+  mappingConst.ulaccum_cont = sineMappingConst; // B
+
+  //  split a and b into 32 bits halves
+  uint32_t a_lo = (uint32_t) mappingInput.uint_cont;
+  uint32_t a_hi = mappingInput.uint_cont >> 32;
+  uint32_t b_lo = (uint32_t) mappingConst.uint_cont;
+  uint32_t b_hi = mappingConst.uint_cont >> 32;
+
+  // * splitting calculations
+  uint64_t p0 = mac_umul_32(a_lo, b_lo);
+  uint64_t p1 = mac_umul_32(a_lo, b_hi);
+  uint64_t p2 = mac_umul_32(a_hi, b_lo);
+  uint64_t p3 = mac_umul_32(a_hi, b_hi);
+
+  // * carry from lower half MUL
+  uint32_t cy = (uint32_t)(((p0 >> 32) + (uint32_t)p1 + (uint32_t)p2) >> 32);
+
+  // final MUL result - we only take hi (S31.32)
+  // lo = p0 + (p1 << 32) + (p2 << 32);
+  idx = p3 + (p1 >> 32) + (p2 >> 32) + cy;
+  idx &= 255;
+
+  // Return lookup value
+  // COMPILER_ERROR - if both modification and return happen
+  // accum_int_t returnVal;
+  // returnVal.accum_cont = sineTable[idx];  
+  // if(angleSign<0) // sin(-x) = -sin(x)
+  //   returnVal.int_cont = (~returnVal.int_cont) + 1;
+  // return returnVal.accum_cont; 
+  
+  return angleSign * sineTable[idx];
+}
+
+// cosine lookup table, for details look at note
+// RUMPS and n1169 extension specific
+inline accum cos_lookup(int inAngle){
+  // Filter input angle
+  if(sign_f(inAngle)<0) // cos(-x) = cos(x)
+    inAngle = (~inAngle)+1;
+
+  // Return lookup value
+  // cos(x) = sin(x+pi/2)
+  inAngle += 51472; // 51472 is pi/2 in accum format
+  return sin_lookup(inAngle);
+}
+
+// Shared with isr3.c
+volatile uint8_t payloadBufferDone = 0;
+volatile uint8_t freqsyncBufferDone = 0;
+volatile int freqsyncBuff[3] = {0}; // buffer for freq sync's 2nd preamble
+volatile accum_int_t qCodewordBuff[768]; // buffer whole frame's Q value
+
+//------------------------------------------------------------------------------
+
+int main(void)
+
+{
+  set_trellis();
+  
+
+  // *** Part1 - Setup ***
+  // MUX - select TM_COM0 & TM_COM1
+  MUXC_SELECT = 0x4;
+
+  pinMode_output(ledpin);
+  digitalWrite_high(ledpin);
+  
+  // Define variables
+  int Idata, Qdata;
+  volatile uint8_t rx_state = STATE_EMPTY;
+  
+  // Buffer for TED-sign version
+  int Isamp[3]; // 0-prev, 1-mid, 2-curr
+  int Qsamp[3];
+  
+  // Counters and flags
+  unsigned int nSamples = 0;
+  accum ted_total;
+  int tempcalc = 0;
+  int ted = 0;
+  int stepCorrection = 0;
+
+  // General calculation buffer
+  accum_int_t temp_accumint;
+  int32_t mulOpA_s32, mulOpB_s32;
+  int64_t mulResult_s64;
+  int tempdump[20];
+  
+  // Buffer for Freq sync
+  accum_int_t iBuff, qBuff;
+  accum_int_t sinBuff, cosBuff;
+  accum_int_t iCorrected, qCorrected;
+  accum_int_t phaseOffset;
+  accum_int_t planeCorr; // plane and random starting phase offset
+  accum_int_t relativeCorr; // relative phase offset
+
+  // Interrupts
+  NVIC_SetPriority(2, 0);   
+
+  // *** END - part1 ***
+
+  // *** Part2 - Lime's initialization ***
+  while(1){
+    // wait for Lime's initialization to be finished
+    while(noc_NC_rxbuff0_av!=1)__NOP();
+    int tempack = NC_NOC_RX_BUFF0;
+    
+    while(noc_NC_txbuff_isfull==1)__NOP();
+    NC_NOC_TX_BUFF0 = tempack;
+
+    break;
+  }
+  
+  // *** Part3 - Lime RX ***
+  while(1){
+
+    //determine sync state - header from IO Core
+    if(rx_state==STATE_EMPTY){
+      while(noc_NC_rxbuff0_av!=1)__NOP();  
+      rx_state = NC_NOC_RX_BUFF0;
+    }
+
+    // DETECT - DSP core doesnt take part
+    
+    // TIMING_SYNC - TED algorithm
+    if(rx_state==RX_TIMING_SYNC){
+      
+      //receive I and Q
+      while(noc_NC_rxbuff0_av!=1)__NOP(); Idata = NC_NOC_RX_BUFF0;
+      while(noc_NC_rxbuff0_av!=1)__NOP(); Qdata = NC_NOC_RX_BUFF0;
+
+      Isamp[nSamples] = Idata;
+      Qsamp[nSamples] = Qdata;
+    
+      if(++nSamples==3){
+        nSamples = 0; // reset counter
+
+        // TED calc - Sign version 
+        ted = 0;
+
+        // I-part
+        tempcalc = sign_f(Isamp[2])- sign_f(Isamp[0]);
+        tempcalc = mac_smul_32((int32_t)(sign_f(Isamp[1])),
+                               (int32_t)(tempcalc));
+        ted += tempcalc;
+
+        // Q-part
+        tempcalc = sign_f(Qsamp[2])- sign_f(Qsamp[0]);
+        tempcalc = mac_smul_32((int32_t)(sign_f(Qsamp[1])),
+                               (int32_t)(tempcalc));
+        ted += tempcalc;
+
+        // determine step correction
+        stepCorrection = sign_f(ted);
+
+        //send back synchronization result
+        while(noc_NC_txbuff_isfull==1)__NOP();
+        NC_NOC_TX_BUFF0 = stepCorrection;
+      }
+
+      // reset rx_state
+      rx_state = STATE_EMPTY;
+    }
+
+    // FREQ_SYNC - calc phase offset 
+    if(rx_state==RX_FREQ_SYNC){
+
+      // Receiving data from IO core
+      // For 1st preamble, it is done in main program
+      // For 2nd preamble, it is done in interrupt subroutine
+      // freq sync calculation is slow, thus interrupt is
+      // necessary so DSP core won't miss 2nd preamble and
+      // payloads to be buffered
+
+      nSamples++;
+
+      // 1st preamble sync - pre sync preparation
+      if(nSamples==1){
+        // receive I and Q
+        while(noc_NC_rxbuff0_av!=1)__NOP(); Idata = NC_NOC_RX_BUFF0;
+        while(noc_NC_rxbuff0_av!=1)__NOP(); Qdata = NC_NOC_RX_BUFF0;
+
+        // Turn on interrupt -  for 2nd preamble and payloads
+        NVIC_EnableIRQ(2); 
+        NC_NOC_CSR1 = 0x4000000; // NOC_RIE_SET
+
+        // determine which cartesius plane the received symbol is at
+        // and move symbol to plane 1 (preamble '1')
+        // so that cross product phase detector works properly
+        if(Idata>=0){
+          if(Qdata>=0) // plane 1, corr 0
+            planeCorr.accum_cont = 0;
+          else                  // plane 4, corr 270 degree
+            planeCorr.accum_cont = 4.7124;
+        }
+        else{
+          if(Qdata>=0) // plane 2, corr 90 degree
+            planeCorr.accum_cont = 1.5708; 
+          else                  // plane 3, corr 180 degree
+            planeCorr.accum_cont = 3.1416;
+        }
+
+      }
+      else if(nSamples==2){
+        // receive I and Q
+        while(freqsyncBufferDone!=1)__NOP();
+        Idata = freqsyncBuff[1]; // index 0 is header
+        Qdata = freqsyncBuff[2];
+      }
+
+      // scale back to 1 and -1 value (1 = +1024)
+      iBuff.accum_cont = Idata; iBuff.int_cont >>= 10;
+      qBuff.accum_cont = Qdata; qBuff.int_cont >>= 10;
+
+      ////
+      // do plane & random starting offset correction
+      // ** cosine sine LUT
+      sinBuff.accum_cont = sin_lookup(planeCorr.int_cont);
+      cosBuff.accum_cont = cos_lookup(planeCorr.int_cont);
+
+      // ** I part
+      iCorrected.accum_cont = 0;
+
+      mulResult_s64 = mac_smul_32((int32_t)(iBuff.int_cont),
+                           (int32_t)(cosBuff.int_cont));
+      temp_accumint.int_cont = (mulResult_s64>>15);
+      iCorrected.accum_cont += temp_accumint.accum_cont;
+
+      mulResult_s64 = mac_smul_32((int32_t)(qBuff.int_cont),
+                           (int32_t)(sinBuff.int_cont));
+      temp_accumint.int_cont = (mulResult_s64>>15);
+      iCorrected.accum_cont += temp_accumint.accum_cont;
+      
+      // ** Q part
+      qCorrected.accum_cont = 0;
+
+      mulResult_s64 = mac_smul_32((int32_t)(qBuff.int_cont),
+                           (int32_t)(cosBuff.int_cont));
+      temp_accumint.int_cont = (mulResult_s64>>15);
+      qCorrected.accum_cont += temp_accumint.accum_cont;
+
+      mulResult_s64 = mac_smul_32((int32_t)(iBuff.int_cont),
+                           (int32_t)(sinBuff.int_cont));
+      temp_accumint.int_cont = (mulResult_s64>>15);
+      qCorrected.accum_cont -= temp_accumint.accum_cont;
+
+      ////
+      // cross-product phase detector
+      temp_accumint.accum_cont = freqsync_preamble[nSamples-1];
+
+      mulResult_s64 = mac_smul_32((int32_t)(temp_accumint.int_cont),
+                           (int32_t)(qCorrected.int_cont));
+      phaseOffset.int_cont = (mulResult_s64>>15);
+
+      mulResult_s64 = mac_smul_32((int32_t)(temp_accumint.int_cont),
+                           (int32_t)(iCorrected.int_cont));
+      temp_accumint.int_cont = (mulResult_s64>>15);
+      phaseOffset.accum_cont -= temp_accumint.accum_cont;
+
+      // 1st preamble sync - random starting phase offset
+      if(nSamples==1){
+        // phase diff adds to plane correction value
+        // as random starting offset correction
+        tempdump[0] = iBuff.int_cont; // freqbit_1 I
+        tempdump[1] = qBuff.int_cont; // freqbit_1 Q
+        tempdump[2] = iCorrected.int_cont; // freqbit_1 Icorr
+        tempdump[3] = qCorrected.int_cont; // freqbit_1 Qcorr
+
+        planeCorr.accum_cont += phaseOffset.accum_cont;
+
+        tempdump[4] = planeCorr.int_cont; // total RandOffset
+      }
+
+      // 2nd preamble sync - symbols' relative phase offset
+      else if(nSamples==2){
+        // relative phase difference
+        relativeCorr.accum_cont = phaseOffset.accum_cont;
+
+        tempdump[5] = iBuff.int_cont; // freqbit_2 I
+        tempdump[6] = qBuff.int_cont; // freqbit_2 Q
+        tempdump[7] = iCorrected.int_cont; // freqbit_2 Icorr
+        tempdump[8] = qCorrected.int_cont; // freqbit_2 Qcorr
+        tempdump[9] = relativeCorr.int_cont; // relative offset
+
+        nSamples = 0;
+
+        // since FREQ_SNYC is concurrently running with PAYLOAD
+        // and PAYLOAD is (supposed) to finish later
+        // wait until payload buffering (by isr3.c) finishes
+        while(payloadBufferDone!=1)__NOP();
+        freqsyncBufferDone = payloadBufferDone = 0; // reset flag
+        digitalWrite_high(0);
+
+        // reset rx_state
+        rx_state = STATE_EMPTY;
+
+        // prepare initial angle value for RX_PHASECORR
+        // random angle correction - from 1st preamble, and
+        // relative angle correction - from 2nd preamble
+        // remember that 2nd preamble is already offset by
+        // this angle, thus we need to recover 1st bit payload
+        // to total offset affecting 2nd preamble, that is
+        // random + relative
+        phaseOffset.accum_cont = planeCorr.accum_cont; // + 0.7854
+        phaseOffset.accum_cont += relativeCorr.accum_cont;
+
+        // signal IO core that DSP core is ready for phase correction
+        while(noc_NC_txbuff_isfull==1)__NOP();
+        NC_NOC_TX_BUFF0 = RX_PHASECORR;        
+      }
+
+    }
+
+    // PHASECORR - correct payload's phase offset
+    if(rx_state==RX_PHASECORR){
+
+      // receive I (scaling was already done on IO core) 
+      while(noc_IC_rxbuff0_av!=1)__NOP();
+      iBuff.int_cont = NC_NOC_RX_BUFF0;
+      qBuff.int_cont = qCodewordBuff[nSamples].int_cont;
+
+      // relative angle correction - from 2nd preamble
+      // each bit after 2nd preamble is affected by this
+      // cumulatively
+      // ** cumulative angle offset
+      phaseOffset.accum_cont += relativeCorr.accum_cont;
+      if(phaseOffset.int_cont>205887)
+        phaseOffset.int_cont -= 205887;
+
+      // ** cosine sine LUT
+      sinBuff.accum_cont = sin_lookup(phaseOffset.int_cont);
+      cosBuff.accum_cont = cos_lookup(phaseOffset.int_cont);
+
+      // ** I part
+      iCorrected.accum_cont = 0;
+
+      mulResult_s64 = mac_smul_32((int32_t)(iBuff.int_cont),
+                           (int32_t)(cosBuff.int_cont));
+      temp_accumint.int_cont = (mulResult_s64>>15);
+      iCorrected.accum_cont += temp_accumint.accum_cont;
+
+      mulResult_s64 = mac_smul_32((int32_t)(qBuff.int_cont),
+                           (int32_t)(sinBuff.int_cont));
+      temp_accumint.int_cont = (mulResult_s64>>15);
+      iCorrected.accum_cont += temp_accumint.accum_cont;
+
+      // send back phase-corrected I
+      while(noc_NC_txbuff_isfull==1)__NOP();
+      NC_NOC_TX_BUFF0 = iCorrected.int_cont;
+
+      if(++nSamples==768){
+        nSamples = 0;
+
+        for(int i=0; i<10; i++){
+          while(noc_NC_txbuff_isfull==1)__NOP();
+          NC_NOC_TX_BUFF0 = tempdump[i];
+        }
+      }
+
+      // reset rx_state;
+      rx_state = STATE_EMPTY;
+
+    }
+
+    // I dont know why I must have this 'break' case
+    // so that COMPILER ERROR wont happen
+    if(rx_state==RX_STOP)
+      break;
+
+  } 
+  // *** END - part3 ***
+
+  // *** Part4 - Turbo Decoding ***
+  // *** END - part4 ***
+
+  return 0;
+
+}

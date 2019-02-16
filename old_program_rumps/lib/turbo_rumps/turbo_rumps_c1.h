@@ -1,0 +1,60 @@
+//------------------------------------------------------------------------------
+// Library
+// Name					: turbo_rumps.h
+// Core-specific: NC0 core 
+// Purpose
+//	- turbo encoding & decoding, fixed configuration
+//	- two identical RSC encoders:
+//	 	K=4
+//	 	G1=13, G2=15, feedback=13
+//	- Both encoders are not trellis terminated
+//	- Log-MAP algorithm
+//	- functions are made as general as possible
+
+#ifndef __TURBO_RUMPS_C1_H_
+#define __TURBO_RUMPS_C1_H_
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdfix.h>
+#include "fixpoint_math.h"
+//#include "drp_intrlv.h"
+
+#define r_win 32
+#define r_win_mul 5
+#define r_M 4
+//#define intrlv_Im1 229
+//#define deintrlv_Im1 238
+
+//#define max_f(x, y) ((x) > (y) ? (x) : (y))
+
+// create trellis structure
+typedef struct {
+	
+	unsigned char numStates;
+	unsigned char nextStates [8][2];
+	unsigned char outputs [16];
+	unsigned char prevStates [8][2];
+}trellis;
+
+// Set trellis based on defined spec
+void set_trellis();
+
+// Decoder - Log-MAP's max* function 
+accum max_f(accum a, accum b);
+
+// Decoder - calc forward metric alpha
+void r_turbodec_acalc(accum curr_delta[16], accum curr_alpha[8], accum nxt_alpha[8]);
+
+// Decoder - calc forward metric beta
+void r_turbodec_bcalc(accum curr_delta[16], accum curr_beta[8], accum nxt_beta[8]);
+
+//------------------------------------------------------------------------------
+// Global variables
+extern trellis trel;
+
+extern const unsigned char intrlv_P[r_M];
+
+extern const unsigned char deintrlv_P[r_M];
+
+#endif /* __TURBO_RUMPS_C1_H_ */
