@@ -1,0 +1,65 @@
+startup_rumps401.c.o
+variant.cpp.o
+wiring_pulse_asm.S.o
+hooks.c.o
+isr.c.o
+itoa.c.o
+iar_calls_sam3.c.o
+avr\dtostrf.c.o
+wiring_analog.c.o
+WInterrupts.c.o
+wiring_shift.c.o
+wiring_digital.c.o
+cortex_handlers.c.o
+wiring.c.o
+WMath.cpp.o
+abi.cpp.o
+
+del !ide.build.path!\core\main.cpp.o
+        del !ide.build.path!\core\main0.cpp.o
+        del !ide.build.path!\core\main1.cpp.o
+        del !ide.build.path!\core\main2.cpp.o
+        del !ide.build.path!\core\main3.cpp.o
+
+        del !ide.build.path!\core\startup_rumps401.c.o
+        del !ide.build.path!\core\variant.cpp.o
+        del !ide.build.path!\core\wiring_pulse_asm.S.o
+        del !ide.build.path!\core\hooks.c.o
+        del !ide.build.path!\core\isr.c.o
+        del !ide.build.path!\core\itoa.c.o
+        del !ide.build.path!\core\iar_calls_sam3.c.o
+        del !ide.build.path!\core\avr\dtostrf.c.o
+        del !ide.build.path!\core\wiring_analog.c.o
+        del !ide.build.path!\core\WInterrupts.c.o
+        del !ide.build.path!\core\wiring_shift.c.o
+        del !ide.build.path!\core\wiring_digital.c.o
+        del !ide.build.path!\core\cortex_handlers.c.o
+        del !ide.build.path!\core\wiring.c.o
+        del !ide.build.path!\core\WMath.cpp.o
+        del !ide.build.path!\core\abi.cpp.o
+        del !ide.build.path!\core\Print.cpp.o
+        del !ide.build.path!\core\Stream.cpp.o
+        del !ide.build.path!\core\Reset.cpp.o
+
+        del /S !ide.build.path!\core\*.o
+
+
+if exist "%param_filename%" (
+    for /f "usebackq delims== tokens=1,2" %%G in ("%param_filename%") DO set %%G=%%H
+    echo Precompile load parameter file 
+) else (
+    echo Postcompile_script: ERROR rumps_compile_param.txt not found
+)
+
+if !core_count! EQU 0 (
+    if exist "%param_filename%" (
+        for /f "usebackq delims== tokens=1,2" %%G in ("%param_filename%") DO set %%G=%%H
+        echo Precompile load parameter file 
+        del !ide.build.path!\core\main.cpp.o
+        rem del /S !ide.build.path!\core\*.d
+    ) else (
+        echo Precompile ERROR rumps_compile_param.txt not found
+    )
+    
+)
+)
