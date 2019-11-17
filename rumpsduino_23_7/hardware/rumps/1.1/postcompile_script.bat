@@ -24,6 +24,7 @@ if exist "%counter_filename%" (
         del !ide.build.path!\core\main.cpp.o
     )
 
+    copy "!ide.build.path!\!source.name!.bin" "!runtime.platform.path!\main!core_count!.bin" /Y
     REM copy "!ide.build.path!\!source.name!.bin" "!runtime.platform.path!\main!core_count!.bin" /Y
     
 	if !core_count! LSS 3 (
