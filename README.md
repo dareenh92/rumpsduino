@@ -51,7 +51,7 @@ There are two ways of reproducing the RUMPSDUINO environment, based on the Ardui
 5. Select that board. If not, you may need to restart the Arduino IDE.
 6. Open the sample program (*described in the next section*), and try to verify or upload.
 
-**B. Integrating into the existing sketchbook folder ** (*may need administrator privilege when running the Arduino IDE, depends on the location*)
+**B. Integrating into the existing sketchbook folder** (*may need administrator privilege when running the Arduino IDE, depends on the location*)
 
 1. Note your Arduino IDE sketchbook folder location from the preferences (*Arduino IDE > File > Preferences*)
 

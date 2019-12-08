@@ -77,7 +77,7 @@ if exist "%counter_filename%" (
             echo Exec_time: !exec! ms
        )
 
-        del %counter_filename% %param_filename% %timer_filename%
+        del "%counter_filename%" "%param_filename%" "%timer_filename%"
          
     )
 ) else (
